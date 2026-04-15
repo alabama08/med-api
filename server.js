@@ -1,0 +1,82 @@
+import "./config/env.js"; // ← must be first, before everything else
+
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
+import cookieParser from "cookie-parser";
+import path from "path";
+import { fileURLToPath } from "url";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import connectDB from "./config/db.js";
+import { validateEnv } from "./utils/validateEnv.js";
+
+import authRoutes         from "./routes/authRoutes.js";
+import doctorRoutes       from "./routes/doctorRoutes.js";
+import appointmentRoutes  from "./routes/appointmentRoutes.js";
+import paymentRoutes      from "./routes/paymentRoutes.js";
+import prescriptionRoutes from "./routes/prescriptionRoutes.js";
+import messageRoutes      from "./routes/messageRoutes.js";
+import reviewRoutes       from "./routes/reviewRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
+import adminRoutes        from "./routes/adminRoutes.js";
+import contentRoutes      from "./routes/contentRoutes.js";
+import uploadRouter       from "./routes/uploadRoute.js";
+import careerRoutes       from "./routes/careerRoutes.js";
+
+import { errorHandler, notFound } from "./middleware/errorMiddleware.js";
+import { initSocket } from "./socket/chatSocket.js";
+
+validateEnv();
+connectDB();
+
+const app        = express();
+const httpServer = createServer(app);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+const io = new Server(httpServer, {
+  cors: {
+    origin:      process.env.CLIENT_URL,
+    methods:     ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+initSocket(io);
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+app.use(morgan("dev"));
+app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
+app.use(express.json({ limit: "10mb" }));
+app.use(cookieParser());
+
+// Serve uploaded files (resumes, images, etc.)
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+app.use("/api/auth",          authRoutes);
+app.use("/api/doctors",       doctorRoutes);
+app.use("/api/appointments",  appointmentRoutes);
+app.use("/api/payments",      paymentRoutes);
+app.use("/api/prescriptions", prescriptionRoutes);
+app.use("/api/messages",      messageRoutes);
+app.use("/api/reviews",       reviewRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/admin",         adminRoutes);
+app.use("/api/content",       contentRoutes);
+app.use("/api/upload",        uploadRouter);
+app.use("/api/careers",       careerRoutes);
+
+app.get("/", (req, res) => res.send("🏥 MedBook API is running..."));
+
+app.use(notFound);
+app.use(errorHandler);
+
+const PORT = process.env.PORT || 5000;
+httpServer.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
