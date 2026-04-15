@@ -42,7 +42,6 @@ export const register = async (req, res, next) => {
       });
     }
 
-    // Send verification email — if this fails, delete the user so they can retry cleanly
     try {
       await sendVerificationEmail(email, verifyToken, name);
     } catch (emailError) {
@@ -103,7 +102,12 @@ export const login = async (req, res, next) => {
 // @POST /api/auth/logout
 export const logout = (req, res, next) => {
   try {
-    res.cookie("token", "", { httpOnly: true, expires: new Date(0) });
+    res.cookie("token", "", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      expires: new Date(0),
+    });
     res.json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     next(error);
@@ -164,11 +168,9 @@ export const forgotPassword = async (req, res, next) => {
     user.resetPasswordExpire = Date.now() + 60 * 60 * 1000;
     await user.save();
 
-    // ✅ Fixed: pass user.name as the third argument
     try {
       await sendPasswordResetEmail(user.email, resetToken, user.name);
     } catch (emailError) {
-      // Roll back the token so the user can try again
       user.resetPasswordToken  = undefined;
       user.resetPasswordExpire = undefined;
       await user.save();
@@ -302,30 +304,27 @@ export const updateUserAvatar = async (req, res, next) => {
   }
 };
 
-/**
- * Search users by role + name query
- * GET /api/users/search?role=doctor&q=john
- */
+// @GET /api/users/search?role=doctor&q=john
 export const searchUsers = async (req, res) => {
   const { role, q = "" } = req.query;
- 
+
   if (!role) {
     res.status(400);
     throw new Error("role query param is required (doctor | patient)");
   }
- 
+
   const filter = {
     role,
-    _id: { $ne: req.user._id },          // exclude self
+    _id: { $ne: req.user._id },
     ...(q.trim()
       ? { name: { $regex: q.trim(), $options: "i" } }
       : {}),
   };
- 
+
   const users = await User.find(filter)
     .select("name avatar email role")
     .limit(20)
     .sort({ name: 1 });
- 
+
   res.json({ success: true, users });
 };
