@@ -1,79 +1,87 @@
 // routes/uploadRoute.js
-import express                from "express";
-import multer                 from "multer";
-import { CloudinaryStorage }  from "multer-storage-cloudinary";
-import cloudinary             from "../config/cloudinary.js";
+import express from "express";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath } from "url";
 import { protect, adminOnly } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-/* ─────────────────────────────────────────────────────
-   CLOUDINARY STORAGE — images & videos
-   Folder: medbook/media
-───────────────────────────────────────────────────── */
-const mediaStorage = new CloudinaryStorage({
-  cloudinary,
-  params: async (req, file) => {
-    const isVideo = file.mimetype.startsWith("video/");
-    return {
-      folder:          "medbook/media",
-      resource_type:   isVideo ? "video" : "image",
-      allowed_formats: ["jpg", "jpeg", "png", "gif", "webp", "mp4", "webm", "mov"],
-      // Optional: auto-compress images, no resize on videos
-      transformation:  isVideo ? [] : [{ quality: "auto", fetch_format: "auto" }],
-    };
+/* ── Absolute path to uploads folder ── */
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+const uploadDir  = path.join(__dirname, "..", "uploads");
+
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+  console.log("📁 Created uploads directory:", uploadDir);
+}
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename:    (req, file, cb) => {
+    const ext      = path.extname(file.originalname).toLowerCase();
+    const basename = path.basename(file.originalname, ext)
+      .replace(/\s+/g, "-")
+      .replace(/[^a-zA-Z0-9-_]/g, "");
+    cb(null, `${Date.now()}-${basename}${ext}`);
   },
 });
 
 /* ─────────────────────────────────────────────────────
-   CLOUDINARY STORAGE — documents (resumes)
-   Folder: medbook/resumes  |  resource_type: raw
+   FILE FILTER — MEDIA ONLY (images + videos)
+   Used by: admin content manager uploads
 ───────────────────────────────────────────────────── */
-const documentStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder:        "medbook/resumes",
-    resource_type: "raw",   // ← required for PDF/DOC/DOCX
-    allowed_formats: ["pdf", "doc", "docx"],
-  },
-});
-
-/* ── File filters (still validate on server side) ── */
 const mediaFilter = (req, file, cb) => {
-  const allowed = /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/;
-  allowed.test(file.mimetype)
-    ? cb(null, true)
-    : cb(new Error(`Unsupported type: ${file.mimetype}`), false);
+  const allowedExts  = /\.(jpeg|jpg|png|gif|webp|mp4|webm|mov)$/i;
+  const allowedMimes = /^(image\/(jpeg|jpg|png|gif|webp)|video\/(mp4|webm|quicktime))$/;
+
+  if (allowedExts.test(file.originalname) && allowedMimes.test(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Unsupported file type: ${file.mimetype}`), false);
+  }
 };
 
+/* ─────────────────────────────────────────────────────
+   FILE FILTER — DOCUMENTS (PDF, DOC, DOCX)
+   Used by: public resume / CV uploads from CareersPage
+───────────────────────────────────────────────────── */
 const documentFilter = (req, file, cb) => {
-  const allowed = [
+  const allowedExts  = /\.(pdf|doc|docx)$/i;
+  const allowedMimes = [
     "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",                                                          // .doc
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",    // .docx
   ];
-  allowed.includes(file.mimetype)
-    ? cb(null, true)
-    : cb(new Error(`Only PDF, DOC, DOCX accepted. Got: ${file.mimetype}`), false);
+
+  const extOk  = allowedExts.test(file.originalname);
+  const mimeOk = allowedMimes.includes(file.mimetype);
+
+  if (extOk && mimeOk) {
+    cb(null, true);
+  } else {
+    cb(new Error(`Unsupported file type: ${file.mimetype}. Only PDF, DOC, and DOCX are accepted.`), false);
+  }
 };
 
 /* ── Multer instances ── */
 const uploadMedia = multer({
-  storage:    mediaStorage,
+  storage,
   fileFilter: mediaFilter,
-  limits:     { fileSize: 50 * 1024 * 1024 }, // 50 MB
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB — videos can be large
 });
 
 const uploadDocument = multer({
-  storage:    documentStorage,
+  storage,
   fileFilter: documentFilter,
-  limits:     { fileSize: 5 * 1024 * 1024 }, // 5 MB
+  limits: { fileSize: 5 * 1024 * 1024 },  // 5 MB — resumes should be small
 });
 
 /* ─────────────────────────────────────────────────────
    POST /api/upload
    Admin-only — images & videos for the content manager
-   Returns: { success, url, public_id }
 ───────────────────────────────────────────────────── */
 router.post(
   "/",
@@ -84,19 +92,15 @@ router.post(
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file received" });
     }
-    console.log("✅ Media uploaded to Cloudinary:", req.file.path);
-    res.status(201).json({
-      success:   true,
-      url:       req.file.path,       // ← full Cloudinary HTTPS URL
-      public_id: req.file.filename,   // ← use this if you need to delete later
-    });
+    const url = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+    console.log("✅ Media uploaded:", req.file.filename, "→", url);
+    res.status(201).json({ success: true, url });
   }
 );
 
 /* ─────────────────────────────────────────────────────
    POST /api/upload/resume
-   Public — PDF / DOC / DOCX for job applications
-   Returns: { success, url, public_id }
+   Public (no auth) — PDF / DOC / DOCX for job applications
 ───────────────────────────────────────────────────── */
 router.post(
   "/resume",
@@ -105,21 +109,10 @@ router.post(
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file received" });
     }
-    console.log("✅ Resume uploaded to Cloudinary:", req.file.path);
-    res.status(201).json({
-      success:   true,
-      url:       req.file.path,
-      public_id: req.file.filename,
-    });
+    const url = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+    console.log("✅ Resume uploaded:", req.file.filename, "→", url);
+    res.status(201).json({ success: true, url });
   }
 );
-
-/* ── Multer error handler ── */
-router.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError || err.message?.startsWith("Unsupported") || err.message?.startsWith("Only")) {
-    return res.status(400).json({ success: false, message: err.message });
-  }
-  next(err);
-});
 
 export default router;

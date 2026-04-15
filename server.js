@@ -1,10 +1,12 @@
-import "./config/env.js";
+import "./config/env.js"; // ← must be first, before everything else
 
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
+import path from "path";
+import { fileURLToPath } from "url";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import connectDB from "./config/db.js";
@@ -32,27 +34,12 @@ connectDB();
 const app        = express();
 const httpServer = createServer(app);
 
-const allowedOrigins = [
-  process.env.CLIENT_URL,
-  "https://medbook-client.vercel.app",
-];
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error(`CORS blocked: ${origin}`));
-    }
-  },
-  credentials:    true,
-  methods:        ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
 
 const io = new Server(httpServer, {
   cors: {
-    origin:      allowedOrigins,
+    origin:      process.env.CLIENT_URL,
     methods:     ["GET", "POST"],
     credentials: true,
   },
@@ -64,10 +51,12 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 app.use(morgan("dev"));
-app.use(cors(corsOptions));
-// ✅ No app.options() line — cors(corsOptions) middleware handles preflight automatically
+app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
+
+// Serve uploaded files (resumes, images, etc.)
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 app.use("/api/auth",          authRoutes);
 app.use("/api/doctors",       doctorRoutes);
