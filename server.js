@@ -65,7 +65,7 @@ app.use(helmet({
 }));
 app.use(morgan("dev"));
 app.use(cors(corsOptions));
-app.options("/(.*)", cors(corsOptions)); // ✅ Express 5 compatible wildcard
+// ✅ No app.options() line — cors(corsOptions) middleware handles preflight automatically
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
