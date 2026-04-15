@@ -1,4 +1,4 @@
-import "./config/env.js"; // ← must be first, before everything else
+import "./config/env.js";
 
 import express from "express";
 import cors from "cors";
@@ -65,7 +65,7 @@ app.use(helmet({
 }));
 app.use(morgan("dev"));
 app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+app.options("/(.*)", cors(corsOptions)); // ✅ Express 5 compatible wildcard
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 
